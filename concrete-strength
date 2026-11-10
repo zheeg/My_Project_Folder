@@ -1,1 +1,453 @@
+```python
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Set visualization style
+sns.set_theme(style="whitegrid", palette="muted")
+plt.rcParams['figure.dpi'] = 120
+
+# Load Concrete Compressive Strength dataset from UCI repository
+url = "https://archive.ics.uci.edu/ml/machine-learning-databases/concrete/compressive/Concrete_Data.xls"
+df = pd.read_excel(url)
+
+# Rename columns to standard engineering names
+df.columns = [
+    'Cement', 'BlastFurnaceSlag', 'FlyAsh', 'Water', 
+    'Superplasticizer', 'CoarseAggregate', 'FineAggregate', 
+    'Age', 'CompressiveStrength'
+]
+
+# Basic dataset overview
+print("Dataset Shape:", df.shape)
+print("\nMissing Values:\n", df.isnull().sum())
+print("\nDataset Info:")
+df.info()
+print("\nStatistical Summary:\n", df.describe())
+
+```
+
+    Dataset Shape: (1030, 9)
+    
+    Missing Values:
+     Cement                 0
+    BlastFurnaceSlag       0
+    FlyAsh                 0
+    Water                  0
+    Superplasticizer       0
+    CoarseAggregate        0
+    FineAggregate          0
+    Age                    0
+    CompressiveStrength    0
+    dtype: int64
+    
+    Dataset Info:
+    <class 'pandas.DataFrame'>
+    RangeIndex: 1030 entries, 0 to 1029
+    Data columns (total 9 columns):
+     #   Column               Non-Null Count  Dtype  
+    ---  ------               --------------  -----  
+     0   Cement               1030 non-null   float64
+     1   BlastFurnaceSlag     1030 non-null   float64
+     2   FlyAsh               1030 non-null   float64
+     3   Water                1030 non-null   float64
+     4   Superplasticizer     1030 non-null   float64
+     5   CoarseAggregate      1030 non-null   float64
+     6   FineAggregate        1030 non-null   float64
+     7   Age                  1030 non-null   int64  
+     8   CompressiveStrength  1030 non-null   float64
+    dtypes: float64(8), int64(1)
+    memory usage: 72.6 KB
+    
+    Statistical Summary:
+                 Cement  BlastFurnaceSlag       FlyAsh        Water  \
+    count  1030.000000       1030.000000  1030.000000  1030.000000   
+    mean    281.165631         73.895485    54.187136   181.566359   
+    std     104.507142         86.279104    63.996469    21.355567   
+    min     102.000000          0.000000     0.000000   121.750000   
+    25%     192.375000          0.000000     0.000000   164.900000   
+    50%     272.900000         22.000000     0.000000   185.000000   
+    75%     350.000000        142.950000   118.270000   192.000000   
+    max     540.000000        359.400000   200.100000   247.000000   
+    
+           Superplasticizer  CoarseAggregate  FineAggregate          Age  \
+    count       1030.000000      1030.000000    1030.000000  1030.000000   
+    mean           6.203112       972.918592     773.578883    45.662136   
+    std            5.973492        77.753818      80.175427    63.169912   
+    min            0.000000       801.000000     594.000000     1.000000   
+    25%            0.000000       932.000000     730.950000     7.000000   
+    50%            6.350000       968.000000     779.510000    28.000000   
+    75%           10.160000      1029.400000     824.000000    56.000000   
+    max           32.200000      1145.000000     992.600000   365.000000   
+    
+           CompressiveStrength  
+    count          1030.000000  
+    mean             35.817836  
+    std              16.705679  
+    min               2.331808  
+    25%              23.707115  
+    50%              34.442774  
+    75%              46.136287  
+    max              82.599225  
+    
+
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Calculate full correlation matrix
+corr_matrix = df.corr()
+
+# Plot full matrix heatmap
+plt.figure(figsize=(12, 10))
+sns.heatmap(
+    corr_matrix,
+    annot=True,
+    fmt=".2f",
+    cmap="coolwarm",
+    vmin=-1,
+    vmax=1,
+    square=True,
+    linewidths=0.5,
+    cbar_kws={"shrink": 0.8}
+)
+
+plt.title("Full Correlation Matrix Heatmap (All Features)", fontsize=14, fontweight='bold', pad=15)
+plt.xticks(rotation=45, ha='right', fontsize=10)
+plt.yticks(rotation=0, fontsize=10)
+plt.tight_layout()
+plt.show()
+
+```
+
+
+    
+![png](output_1_0.png)
+    
+
+
+
+```python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
+
+# Step 1: Define mix proportion columns that define an identical batch/mix
+mix_components = [
+    'Cement',
+    'BlastFurnaceSlag',
+    'FlyAsh',
+    'Water',
+    'Superplasticizer',
+    'CoarseAggregate',
+    'FineAggregate'
+]
+
+# Step 2: Separate early-age data (e.g., 7-day tests) and 28-day target tests
+# Note: You can change EARLY_AGE to 3 or 7 based on your site inspection protocol
+EARLY_AGE = 7
+TARGET_AGE = 28
+TARGET_FC_28 = 30.0  # Required 28-day design strength (f'c in MPa)
+
+df_early = df[df['Age'] == EARLY_AGE].copy()
+df_target = df[df['Age'] == TARGET_AGE].copy()
+
+# Rename strength columns to distinguish early vs 28-day
+df_early = df_early.rename(columns={'CompressiveStrength': 'Early_Strength'})
+df_target = df_target.rename(columns={'CompressiveStrength': 'Target_Strength_28d'})
+
+# Average out any duplicate test batches with identical mix design
+df_early_grouped = df_early.groupby(mix_components)['Early_Strength'].mean().reset_index()
+df_target_grouped = df_target.groupby(mix_components)['Target_Strength_28d'].mean().reset_index()
+
+# Step 3: Merge early strength with 28-day strength for identical mix formulations
+qc_df = pd.merge(df_early_grouped, df_target_grouped, on=mix_components, how='inner')
+
+# Step 4: Engineering Feature Engineering
+qc_df['Water_Cement_Ratio'] = qc_df['Water'] / qc_df['Cement']
+qc_df['Fine_Coarse_Ratio'] = qc_df['FineAggregate'] / qc_df['CoarseAggregate']
+
+# Step 5: Define QC Acceptance Label (1 = Pass f'c >= 30 MPa at 28 days, 0 = Reject)
+qc_df['QC_Pass_28d'] = (qc_df['Target_Strength_28d'] >= TARGET_FC_28).astype(int)
+
+# Display dataset size after matching
+print(f"Matched mixes tested at both {EARLY_AGE} and {TARGET_AGE} days: {len(qc_df)}")
+print(f"Class distribution:\n{qc_df['QC_Pass_28d'].value_counts()}")
+
+# Step 6: Features Selection (Early strength + mix characteristics)
+feature_cols = [
+    'Early_Strength',
+    'Cement',
+    'Water',
+    'Water_Cement_Ratio',
+    'Superplasticizer',
+    'BlastFurnaceSlag',
+    'FlyAsh',
+    'Fine_Coarse_Ratio'
+]
+
+X = qc_df[feature_cols]
+y = qc_df['QC_Pass_28d']
+
+# Train/Test Split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=42, stratify=y
+)
+
+# Step 7: Train Quality Control Classifier
+model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
+model.fit(X_train, y_train)
+
+# Step 8: Predictions and Evaluation
+y_pred = model.predict(X_test)
+y_pred_proba = model.predict_proba(X_test)[:, 1]
+
+print("\n=== QC Acceptance Classification Report (28-day Prediction from Early Strength) ===")
+print(classification_report(y_test, y_pred, target_names=[f'Reject (<{TARGET_FC_28} MPa)', f'Accept (>={TARGET_FC_28} MPa)']))
+
+roc_score = roc_auc_score(y_test, y_pred_proba)
+print(f"ROC-AUC Score: {roc_score:.4f}")
+
+# Step 9: Visualizations (Confusion Matrix and Feature Importance)
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[0],
+            xticklabels=['Pred Reject', 'Pred Accept'],
+            yticklabels=['Actual Reject', 'Actual Accept'])
+axes[0].set_title(f"QC Acceptance Matrix (Based on Day {EARLY_AGE} Test)", fontsize=11, fontweight='bold')
+axes[0].set_ylabel("True 28-day Status")
+axes[0].set_xlabel("Early-Age Model Decision")
+
+# Feature Importance
+importances = pd.Series(model.feature_importances_, index=feature_cols).sort_values(ascending=True)
+importances.plot(kind='barh', ax=axes[1], color='#2b5c8f', edgecolor='black')
+axes[1].set_title("Feature Contribution to 28-Day Acceptance", fontsize=11, fontweight='bold')
+axes[1].set_xlabel("Relative Importance")
+
+plt.tight_layout()
+plt.show()
+
+```
+
+    Matched mixes tested at both 7 and 28 days: 115
+    Class distribution:
+    QC_Pass_28d
+    1    75
+    0    40
+    Name: count, dtype: int64
+    
+    === QC Acceptance Classification Report (28-day Prediction from Early Strength) ===
+                         precision    recall  f1-score   support
+    
+     Reject (<30.0 MPa)       0.75      0.90      0.82        10
+    Accept (>=30.0 MPa)       0.94      0.84      0.89        19
+    
+               accuracy                           0.86        29
+              macro avg       0.85      0.87      0.85        29
+           weighted avg       0.88      0.86      0.86        29
+    
+    ROC-AUC Score: 0.9316
+    
+
+
+    
+![png](output_2_1.png)
+    
+
+
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, roc_auc_score
+
+# 1. Compute ROC curve coordinates and Area Under Curve (AUC)
+fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba)
+roc_auc = roc_auc_score(y_test, y_pred_proba)
+
+# 2. Find the optimal threshold using Youden's J statistic (J = TPR - FPR)
+j_scores = tpr - fpr
+optimal_idx = np.argmax(j_scores)
+optimal_threshold = thresholds[optimal_idx]
+optimal_fpr = fpr[optimal_idx]
+optimal_tpr = tpr[optimal_idx]
+
+# 3. Plot ROC Curve
+plt.figure(figsize=(8, 6))
+
+# Plot model ROC curve
+plt.plot(
+    fpr, 
+    tpr, 
+    color='#1f77b4', 
+    lw=2.5, 
+    label=f'QC Model ROC (AUC = {roc_auc:.3f})'
+)
+
+# Plot diagonal reference line (Random Guess)
+plt.plot(
+    [0, 1], 
+    [0, 1], 
+    color='gray', 
+    lw=1.5, 
+    linestyle='--', 
+    label='Random Chance (AUC = 0.50)'
+)
+
+# Highlight optimal operating threshold point
+plt.scatter(
+    optimal_fpr, 
+    optimal_tpr, 
+    color='red', 
+    s=80, 
+    zorder=5, 
+    label=f'Optimal Cutoff (Threshold = {optimal_threshold:.2f})'
+)
+
+# Annotate optimal operating point
+plt.annotate(
+    f"Optimal Point\nTPR: {optimal_tpr:.2f}, FPR: {optimal_fpr:.2f}",
+    xy=(optimal_fpr, optimal_tpr),
+    xytext=(optimal_fpr + 0.08, optimal_tpr - 0.12),
+    arrowprops=dict(facecolor='black', shrink=0.08, width=1, headwidth=6),
+    fontsize=9,
+    fontweight='bold',
+    bbox=dict(boxstyle="round,pad=0.3", fc="yellow", alpha=0.5)
+)
+
+# Configure axes and labels
+plt.xlim([-0.02, 1.02])
+plt.ylim([-0.02, 1.05])
+plt.xlabel('False Positive Rate (1 - Specificity / False Acceptance)', fontsize=11)
+plt.ylabel('True Positive Rate (Sensitivity / QC Detection Rate)', fontsize=11)
+plt.title(f'ROC Curve: QC 28-Day Strength Acceptance Model', fontsize=12, fontweight='bold', pad=12)
+plt.legend(loc='lower right', fontsize=10)
+plt.grid(True, linestyle=':', alpha=0.6)
+
+plt.tight_layout()
+plt.show()
+
+# Print metrics at the optimal operating point
+print(f"Area Under the Curve (AUC): {roc_auc:.4f}")
+print(f"Optimal Decision Threshold: {optimal_threshold:.4f}")
+print(f"At Optimal Point -> Sensitivity (TPR): {optimal_tpr:.2%}, False Alarm Rate (FPR): {optimal_fpr:.2%}")
+
+```
+
+
+    
+![png](output_3_0.png)
+    
+
+
+    Area Under the Curve (AUC): 0.9316
+    Optimal Decision Threshold: 0.2729
+    At Optimal Point -> Sensitivity (TPR): 94.74%, False Alarm Rate (FPR): 10.00%
+    
+
+
+```python
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+
+# Step 1: Select only independent and essential engineering parameters
+# (Excluding Water and Cement since Water_Cement_Ratio represents them)
+lean_features = [
+    'Early_Strength',
+    'Water_Cement_Ratio',
+    'Superplasticizer',
+    'BlastFurnaceSlag',
+    'FlyAsh'
+]
+
+X_lean = qc_df[lean_features]
+y = qc_df['Target_Strength_28d']
+
+# Step 2: Train Ensemble Model to capture accurate benchmark
+rf = RandomForestRegressor(n_estimators=100, max_depth=6, random_state=42)
+rf.fit(X_lean, y)
+rf_pred = rf.predict(X_lean)
+
+# Step 3: Fit a clean linear formula on ensemble predictions (Distillation)
+lean_reg = Ridge(alpha=1.0)
+lean_reg.fit(X_lean, rf_pred)
+
+y_formula_pred = lean_reg.predict(X_lean)
+
+# Performance Metrics
+r2 = r2_score(y, y_formula_pred)
+rmse = np.sqrt(mean_squared_error(y, y_formula_pred))
+mae = mean_absolute_error(y, y_formula_pred)
+
+# Step 4: Display Clean Formula
+intercept = lean_reg.intercept_
+coefs = lean_reg.coef_
+
+terms = [f"{intercept:.2f}"]
+for name, coef in zip(lean_features, coefs):
+    sign = "+" if coef >= 0 else "-"
+    terms.append(f"{sign} ({abs(coef):.3f} * {name})")
+
+formula_str = " ".join(terms)
+
+print("=" * 75)
+print("PRACTICAL 28-DAY STRENGTH FORMULA:")
+print("=" * 75)
+print(f"f_c_28 = {formula_str}\n")
+print(f"R2 Score : {r2:.3f}")
+print(f"RMSE     : {rmse:.2f} MPa")
+print(f"MAE      : {mae:.2f} MPa")
+print("=" * 75)
+
+# Step 5: Summary Table
+summary_df = pd.DataFrame({
+    'Parameter': ['Intercept (Constant)'] + lean_features,
+    'Coefficient': [intercept] + list(coefs)
+})
+print("\nExcel-Ready Coefficients:")
+print(summary_df.to_string(index=False))
+
+```
+
+    ===========================================================================
+    PRACTICAL 28-DAY STRENGTH FORMULA:
+    ===========================================================================
+    f_c_28 = 12.48 + (0.993 * Early_Strength) - (3.164 * Water_Cement_Ratio) - (0.033 * Superplasticizer) + (0.025 * BlastFurnaceSlag) + (0.044 * FlyAsh)
+    
+    R2 Score : 0.902
+    RMSE     : 4.93 MPa
+    MAE      : 3.49 MPa
+    ===========================================================================
+    
+    Excel-Ready Coefficients:
+               Parameter  Coefficient
+    Intercept (Constant)    12.480764
+          Early_Strength     0.993376
+      Water_Cement_Ratio    -3.164248
+        Superplasticizer    -0.033450
+        BlastFurnaceSlag     0.024711
+                  FlyAsh     0.043712
+    
+
+
+```python
+
+```
+
+
+```python
+
+```
 
